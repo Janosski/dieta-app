@@ -1,6 +1,5 @@
 streamlit
 plotly
-supabasestreamlit
 requests
 pandas
 pillow
