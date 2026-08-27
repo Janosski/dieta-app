@@ -269,25 +269,41 @@ else:
 
 st.divider()
 
-# --- 8. PROPOZYCJE DAŃ ZE ZDJĘCIAMI ---
+#--- 8. PROPOZYCJE DAŃ ZE ZDJĘCIAMI ---
 st.subheader(" Pomysł na posiłek")
 
 if zostalo_kcal > 0:
     st.write(f" Zostało Ci jeszcze {zostalo_kcal:.0f} kcal. Oto propozycja dania dla Ciebie:")
 
+Logika wyboru posiłku w zależności od kalorii
+    if zostalo_kcal < 250:
+        nazwa = "Jogurt naturalny z garścią borówek"
+        kcal_str = "~150 kcal | Białko: 10g | Tłuszcz: 4g"
+        skladniki = "150g jogurtu naturalnego/greckiego skyr, 50g świeżych borówek lub malin"
+        przepis = "Wymieszaj jogurt z owocami. Możesz posypać szczyptą cynamonu."
+        foto_url = "https://images.unsplash.com/photo-1488477181946-6428a0291777"
+    elif zostalo_kcal < 500:
+        nazwa = "Tosty z serem, szynką i warzywami"
+        kcal_str = "~450 kcal | Białko: 22g | Tłuszcz: 18g"
+        skladniki = "2 kromki chleba tostowego, 2 plastry sera, 2 plastry szynki, pomidor"
+        przepis = "Złóż tosty z serem i szynką, zapiecz w opiekaczu. Podawaj z warzywami."
+        foto_url = "https://images.unsplash.com/photo-1528735602780-2552fd46c7af"
+    else:
+        nazwa = "Kurczak z ryżem i warzywami na parze"
+        kcal_str = "~650 kcal | Białko: 45g | Tłuszcz: 12g"
+        skladniki = "150g piersi z kurczaka, 80g ryżu basmati, mix ulubionych warzyw"
+        przepis = "Ugotuj ryż. Kurczaka usmaż na odrobinie oliwy i podawaj z ugotowanymi warzywami."
+        foto_url = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c"
+
     col_img, col_txt = st.columns([1, 2])
 
-    foto_url = "https://images.unsplash.com/photo-1528735602780-2552fd46c7af"
-
     with col_img:
-        if foto_url:
-            st.image(foto_url, use_container_width=True)
+        st.image(foto_url, use_container_width=True)
 
     with col_txt:
-        st.markdown("###  Tosty z serem, szynką i warzywami")
-        st.write("Kaloryczność: ~450 kcal | Białko: 22g | Tłuszcz: 18g")
-        st.write("Składniki: 2 kromki chleba tostowego, 2 plastry sera żółtego, 2 plastry szynki, pomidor, ogórek")
-        st.write("Przygotowanie: Złóż tosty z serem i szynką, zapiecz w opiekaczu. Podawaj z pokrojonymi warzywami.")
-
+        st.markdown(f"###  {nazwa}")
+        st.write(f"Kaloryczność: {kcal_str}")
+        st.write(f"Składniki: {skladniki}")
+        st.write(f"Przygotowanie: {przepis}")
 else:
-    st.warning("Przekroczyłeś dzisiejszy limit kalorii! Odpocznij i pij dużo wody 💧")
+    st.warning("Przekroczyłeś dzisiejszy limit kalorii! Odpocznij i pij dużo wody ")
