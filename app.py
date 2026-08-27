@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 
 # --- 1. INICJALIZACJA GEMINI AI ---
-GEMINI_KEY = "AQ.Ab8RN6Jvm_UjVz1relmWPPDWTHCmCcr-HCLVv31p7yPnbVUAMA"
+GEMINI_KEY = st.secrets["GEMINI_KEY"]
 client = genai.Client(api_key=GEMINI_KEY)
 
 def przelicz_glos_na_makro(tekst_glosowy):
