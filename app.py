@@ -66,7 +66,7 @@ st.title("🥗 Rodzinny Dziennik Diety & Skaner")
 # Wybór osoby i dnia
 col1, col2 = st.columns(2)
 with col1:
-    osoba = st.selectbox("👤 Wybierz osobę:", ["Janek", "Kasia", "Mama", "Tata"])
+    osoba = st.selectbox("👤 Wybierz osobę:", ["Janek", "Justyna", "Mama", "Seba"])
 with col2:
     wybrany_dzien = st.selectbox("📅 Dzień tygodnia:", ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"])
 
