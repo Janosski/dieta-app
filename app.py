@@ -28,14 +28,14 @@ def przelicz_glos_na_makro(tekst_glosowy):
     }}
     """
     try:
-        Response = client.models.generate_content(
-            model='gemini-2.0-flash',
+        response = client.models.generate_content(
+            model='gemini-3.6-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
             )
         )
-        return json.loads(Response.text)
+        return json.loads(response.text)
     except Exception as e:
         st.error(f"Błąd analizy AI: {e}")
         return None
