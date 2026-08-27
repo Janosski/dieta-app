@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -18,7 +19,7 @@ def przelicz_glos_na_makro(tekst_glosowy):
     prompt = f"""
     Przeanalizuj wypowiedź użytkownika o zjedzonym posiłku: "{tekst_glosowy}".
     Rozpoznaj składniki, oszacuj ich wagę oraz wylicz wartości odżywcze.
-    Zwróć wynik WYŁĄCZNIE jako czysty JSON bez żadnego dodatkowego tekstu ani formatowania markdown w tym formacie:
+    Zwróć wynik WYŁĄCZNIE jako czysty JSON w tym formacie:
     {{
         "nazwa": "Nazwa posiłku",
         "kcal": 0,
@@ -27,18 +28,27 @@ def przelicz_glos_na_makro(tekst_glosowy):
         "wegle": 0
     }}
     """
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
-        return json.loads(response.text)
-    except Exception as e:
-        st.error(f"Błąd analizy AI: {e}")
-        return None
+    modele = ['gemini-3.6-flash', 'gemini-2.5-flash']
+
+    for model_name in modele:
+        for proba in range(2): # próbuje 2 razy dla każdego modelu
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                if "503" in str(e):
+                    time.sleep(1) # odczekaj sekundę przed ponowną próbą
+                    continue
+                break
+
+    st.error("Serwery AI są przeciążone. Spróbuj kliknąć nagrywanie jeszcze raz za chwilę.")
+    return None
 
 # --- 2. FUNKCJA POBIERANIA MAKRO Z KODU KRESKOWEGO ---
 def pobierz_dane_z_kodu(kod_kreskowy):
