@@ -17,20 +17,21 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 def przelicz_glos_na_makro(tekst_glosowy):
     prompt = f"""
-    Tekst: "{tekst_glosowy}".
-    Przelicz makro i zwróć TYLKO JSON:
+    Przeanalizuj wypowiedź użytkownika o zjedzonym posiłku: "{tekst_glosowy}".
+    Rozpoznaj składniki, oszacuj ich wagę oraz wylicz wartości odżywcze.
+    Zwróć wynik WYŁĄCZNIE jako czysty JSON w tym formacie:
     {{
-        "nazwa": "Krótka nazwa posiłku",
+        "nazwa": "Nazwa posiłku",
         "kcal": 0,
         "bialko": 0,
         "tluszcz": 0,
         "wegle": 0
     }}
     """
-    modele = ['gemini-1.5-flash', 'gemini-2.5-flash']
-    
+    modele = ['gemini-3.6-flash', 'gemini-2.5-flash']
+
     for model_name in modele:
-        for proba in range(2):
+        for proba in range(2): # próbuje 2 razy dla każdego modelu
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -42,11 +43,39 @@ def przelicz_glos_na_makro(tekst_glosowy):
                 return json.loads(response.text)
             except Exception as e:
                 if "503" in str(e):
-                    time.sleep(1)
+                    time.sleep(1) # odczekaj sekundę przed ponowną próbą
                     continue
                 break
-                
-    st.error("Serwery AI są przeciążone. Spróbuj ponownie.")
+
+    st.error("Serwery AI są przeciążone. Spróbuj kliknąć nagrywanie jeszcze raz za chwilę.")
+    return None
+
+# --- 2. FUNKCJA POBIERANIA MAKRO Z KODU KRESKOWEGO ---
+def pobierz_dane_z_kodu(kod_kreskowy):
+    kod_clean = str(kod_kreskowy).strip()
+    url = f"https://world.openfoodfacts.org/api/v0/product/{kod_clean}.json"
+    headers = {'User-Agent': 'RodzinnaDietaApp - Web - Version 1.0'}
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == 1:
+                product = data.get("product", {})
+                nutriments = product.get("nutriments", {})
+                nazwa = (product.get("product_name_pl") or product.get("product_name") or "Nieznany produkt")
+                kcal = nutriments.get("energy-kcal_100g") or nutriments.get("energy-kcal_value") or 0
+                bialko = nutriments.get("proteins_100g") or nutriments.get("proteins_value") or 0
+                tluszcz = nutriments.get("fat_100g") or nutriments.get("fat_value") or 0
+                wegle = nutriments.get("carbohydrates_100g") or nutriments.get("carbohydrates_value") or 0
+                return {
+                    "nazwa": nazwa,
+                    "kcal_100g": round(float(kcal), 1),
+                    "bialko_100g": round(float(bialko), 1),
+                    "tluszcz_100g": round(float(tluszcz), 1),
+                    "wegle_100g": round(float(wegle), 1)
+                }
+    except Exception:
+        pass
     return None
 
 # --- 2. BAZA DANYCH (POSIŁKI I PROFILE OSOBNE DLA KAŻDEGO) ---
@@ -117,107 +146,169 @@ def zapisz_profil(osoba, waga, wzrost, wiek, plec, aktywnosc, target_kcal):
     conn.commit()
     conn.close()
 
+
 def dodaj_posilek(osoba, dzien, typ_posilku, opis, kcal, bialko, tluszcz, wegle):
     conn = sqlite3.connect('dziennik_zywieniowy.db')
     c = conn.cursor()
+    data_teraz = datetime.now().strftime("%Y-%m-%d %H:%M")
     c.execute('''
-        INSERT INTO posilki (osoba, dzien, typ_posilku, opis, kcal, bialko, tluszcz, wegle)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (osoba, dzien, typ_posilku, opis, kcal, bialko, tluszcz, wegle))
+        INSERT INTO posilki (osoba, dzien, typ_posilku, opis, kcal, bialko, tluszcz, wegle, data_wpisu)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (osoba, dzien, typ_posilku, opis, kcal, bialko, tluszcz, wegle, data_teraz))
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- 3. INTERFEJS STRONY I SEKCJA PROFILE ---
-st.title("🥗 Dziennik Żywieniowy & AI")
+# --- 4. USTAWIENIA STRONY ---
+st.set_page_config(page_title="Rodzinny Asystent Diety", page_icon="🥗", layout="wide")
+st.title("🥗 Rodzinny Asystent Diety i Zdrowia")
 
-st.sidebar.header("👤 Profil Użytkownika")
-wybrana_osoba = st.sidebar.selectbox("Wybierz profil:", ["Janusz", "Justyna", "Mama"])
-wybrany_dzien = st.sidebar.date_input("Dzień:", datetime.now())
-
-# Wczytanie zapisanych danych z bazy dla wybranej osoby
-dane_p = pobierz_profil(wybrana_osoba)
-
-with st.sidebar.expander(f"⚙️ Ustawienia kalkulatora ({wybrana_osoba})"):
-    with st.form("form_profil"):
-        waga_in = st.number_input("Waga (kg)", value=float(dane_p["waga"]), step=0.5)
-        wzrost_in = st.number_input("Wzrost (cm)", value=float(dane_p["wzrost"]), step=1.0)
-        wiek_in = st.number_input("Wiek", value=int(dane_p["wiek"]), step=1)
-        plec_in = st.selectbox("Płeć", ["Mężczyzna", "Kobieta"], index=0 if dane_p["plec"] == "Mężczyzna" else 1)
-        
-        akt_opcje = {
-            "Siedzący tryb życia (praca biurowa)": 1.2,
-            "Umiarkowana aktywność (trening 2-3 razy/tydz.)": 1.4,
-            "Duża aktywność (praca fizyczna / trening codziennie)": 1.6
-        }
-        
-        # Znalezienie zapisanego indeksu aktywności
-        default_akt_idx = 1
-        for idx, val in enumerate(akt_opcje.values()):
-            if val == dane_p["aktywnosc"]:
-                default_akt_idx = idx
-                
-        akt_label = st.selectbox("Poziom aktywności", list(akt_opcje.keys()), index=default_akt_idx)
-        akt_val = akt_opcje[akt_label]
-        
-        submit_profil = st.form_submit_button("💾 Zapisz profil")
-        
-        if submit_profil:
-            # Obliczenie zapotrzebowania BMR i TDEE
-            bmr = (10 * waga_in) + (6.25 * wzrost_in) - (5 * wiek_in) + (5 if plec_in == "Mężczyzna" else -161)
-            target_kcal = bmr * akt_val
-            
-            zapisz_profil(wybrana_osoba, waga_in, wzrost_in, wiek_in, plec_in, akt_val, target_kcal)
-            st.sidebar.success(f"Zapisano dane dla: {wybrana_osoba}!")
-            st.rerun()
-
-# Wyliczenie aktualnego BMI i Kcal dla wybranej osoby
-bmi = dane_p["waga"] / ((dane_p["wzrost"] / 100) ** 2)
-target_kcal = dane_p["target_kcal"]
-
-st.sidebar.markdown(f"**BMI:** `{bmi:.1f}`")
-st.sidebar.markdown(f"**Cel dzienny:** `{target_kcal:.0f} kcal`")
+col_prof1, col_prof2 = st.columns(2)
+with col_prof1:
+    osoba = st.selectbox("👤 Profil użytkownika:", ["Janek", "Justyna", "Mama", "Seba","gość","gość2"])
+with col_prof2:
+    wybrany_dzien = st.selectbox("📅 Dzień tygodnia:", ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"])
 
 st.divider()
 
-# --- 4. DODAWANIE POSIŁKU (GŁOS / TEKST) ---
-st.subheader(f"🎙️ Dodaj posiłek dla: {wybrana_osoba}")
-tekst_glosowy = speech_to_text(language='pl', start_prompt="🔴 Dotknij i mów", stop_prompt="⏹️ Zakończ", key='speech')
+# --- 5. KALKULATOR ZAPOTRZEBOWANIA (WIEK, PRACA, WODA, BMI) ---
+st.subheader("⚙️ Twoje Parametry & Cel Kaloryczny")
 
-if tekst_glosowy:
-    st.info(f"Rozpoznano: {tekst_glosowy}")
-    with st.spinner("Przeliczanie kalorii przez AI..."):
-        wynik = przelicz_glos_na_makro(tekst_glosowy)
-        if wynik:
-            dodaj_posilek(
-                wybrana_osoba,
-                wybrany_dzien.strftime("%Y-%m-%d"),
-                "Posiłek",
-                wynik.get("nazwa", tekst_glosowy),
-                wynik.get("kcal", 0),
-                wynik.get("bialko", 0),
-                wynik.get("tluszcz", 0),
-                wynik.get("wegle", 0)
-            )
-            st.success(f"Dodano dla {wybrana_osoba}: {wynik.get('nazwa')} ({wynik.get('kcal')} kcal)")
-            st.rerun()
+c1, c2, c3, c4 = st.columns(4)
+plec = c1.radio("Płeć:", ["Mężczyzna", "Kobieta"])
+wiek = c2.number_input("Wiek (lata):", min_value=10, max_value=100, value=30)
+waga = c3.number_input("Waga (kg):", min_value=30.0, max_value=200.0, value=80.0)
+wzrost = c4.number_input("Wzrost (cm):", min_value=100, max_value=230, value=175)
+
+c_praca, c_cel = st.columns(2)
+tryb_pracy = c_praca.selectbox("💼 Tryb pracy / Aktywność:", [
+    "Siedząca (biuro, brak ćwiczeń)",
+    "Lekka (praca mieszana, spacery)",
+    "Fizyczna (praca na nogach / na budowie)",
+    "Bardzo ciężka fizyczna / intensywne treningi"
+])
+cel = c_cel.selectbox("🎯 Cel:", ["Redukcja (Schudnąć)", "Utrzymanie wagi", "Masa (Przytyć)"])
+
+if plec == "Mężczyzna":
+    bmr = 10 * waga + 6.25 * wzrost - 5 * wiek + 5
+else:
+    bmr = 10 * waga + 6.25 * wzrost - 5 * wiek - 161
+
+mnozniki = {
+    "Siedząca (biuro, brak ćwiczeń)": 1.2,
+    "Lekka (praca mieszana, spacery)": 1.4,
+    "Fizyczna (praca na nogach / na budowie)": 1.6,
+    "Bardzo ciężka fizyczna / intensywne treningi": 1.8
+}
+cpm = bmr * mnozniki[tryb_pracy]
+
+if cel == "Redukcja (Schudnąć)":
+    target_kcal = cpm - 400
+elif cel == "Masa (Przytyć)":
+    target_kcal = cpm + 300
+else:
+    target_kcal = cpm
+
+target_kcal = round(target_kcal)
+woda_litry = round(waga * 0.035, 1)
+bmi = round(waga / ((wzrost/100)**2), 1)
+
+m1, m2, m3 = st.columns(3)
+m1.metric("🎯 Cel kaloryczny", f"{target_kcal} kcal")
+m2.metric("💧 Zapotrzebowanie na wodę", f"{woda_litry} L / dzień")
+m3.metric("📊 Twoje BMI", f"{bmi}")
 
 st.divider()
 
-# --- 5. DZIENNIK I PODSUMOWANIE DZIAŁANIA ---
-st.subheader(f"📊 Dziennik: {wybrana_osoba} ({wybrany_dzien})")
+# --- 6. DODAWANIE POSIŁKU (SKANER / AI GŁOS / RĘCZNIE) ---
+st.subheader("➕ Dodaj posiłek")
+
+c_cam, c_voice = st.columns(2)
+
+with c_cam:
+    st.write("📷 **Skaner kodu kreskowego:**")
+    zdjecie_kodu = st.camera_input("Nakieruj aparat na kod")
+    wykryty_kod = ""
+    if zdjecie_kodu:
+        img = Image.open(zdjecie_kodu)
+        decoded_objects = decode(img)
+        if decoded_objects:
+            wykryty_kod = decoded_objects[0].data.decode('utf-8')
+            st.success(f"✅ Odczytano kod: **{wykryty_kod}**")
+        else:
+            st.warning("⚠️ Nie odczytano kodu. Spróbuj zbliżyć obiektyw.")
+    kod_input = st.text_input("Kod kreskowy (lub wpisz ręcznie):", value=wykryty_kod)
+
+dane_z_kodu = None
+if kod_input:
+    dane_z_kodu = pobierz_dane_z_kodu(kod_input)
+
+dane_z_ai = None
+with c_voice:
+    st.write("🎙️ **Dyktuj posiłek głosem (AI przeliczy makro):**")
+    tekst_z_głosu = speech_to_text(language='pl', start_prompt="🔴 Nagraj głos", stop_prompt="🟢 Stop", key='stt')
+    if tekst_z_głosu:
+        st.info(f"Rozpoznano: *{tekst_z_głosu}*")
+        with st.spinner("🤖 Gemini AI analizuje posiłek..."):
+            dane_z_ai = przelicz_glos_na_makro(tekst_z_głosu)
+
+# Wyznaczenie domyślnych wartości w formularzu
+if dane_z_ai:
+    domyslna_nazwa = dane_z_ai.get('nazwa', '')
+    def_kcal = float(dane_z_ai.get('kcal', 0.0))
+    def_b = float(dane_z_ai.get('bialko', 0.0))
+    def_t = float(dane_z_ai.get('tluszcz', 0.0))
+    def_w = float(dane_z_ai.get('wegle', 0.0))
+elif dane_z_kodu:
+    domyslna_nazwa = dane_z_kodu['nazwa']
+    def_kcal = dane_z_kodu['kcal_100g']
+    def_b = dane_z_kodu['bialko_100g']
+    def_t = dane_z_kodu['tluszcz_100g']
+    def_w = dane_z_kodu['wegle_100g']
+else:
+    domyslna_nazwa = ""
+    def_kcal, def_b, def_t, def_w = 0.0, 0.0, 0.0, 0.0
+
+typ_posilku = st.selectbox("Typ posiłku:", ["Śniadanie", "Drugie śniadanie", "Obiad", "Kolacja", "Przekąska"])
+opis_input = st.text_input("Nazwa posiłku:", value=domyslna_nazwa)
+
+if dane_z_kodu and not dane_z_ai:
+    gramatura = st.number_input("Waga porcji z kodu (g):", min_value=1, value=100)
+    przelicznik = gramatura / 100.0
+    calc_kcal = round(def_kcal * przelicznik, 1)
+    calc_b = round(def_b * przelicznik, 1)
+    calc_t = round(def_t * przelicznik, 1)
+    calc_w = round(def_w * przelicznik, 1)
+else:
+    calc_kcal, calc_b, calc_t, calc_w = def_kcal, def_b, def_t, def_w
+
+col_k, col_b, col_t, col_w = st.columns(4)
+input_kcal = col_k.number_input("Kcal", value=calc_kcal)
+input_b = col_b.number_input("Białko (g)", value=calc_b)
+input_t = col_t.number_input("Tłuszcz (g)", value=calc_t)
+input_w = col_w.number_input("Węgle (g)", value=calc_w)
+
+if st.button("💾 Zapisz posiłek w dzienniku", type="primary"):
+    if opis_input:
+        dodaj_posilek(osoba, wybrany_dzien, typ_posilku, opis_input, input_kcal, input_b, input_t, input_w)
+        st.success(f"Dodano posiłek dla {osoba}!")
+        st.rerun()
+
+st.divider()
+
+# --- 7. DZIENNIK I PASEK POSTĘPU ---
+st.subheader(f"📊 Dziennik posiłków: {osoba} ({wybrany_dzien})")
 
 conn = sqlite3.connect('dziennik_zywieniowy.db')
-df = pd.read_sql_query("SELECT typ_posilku, opis, kcal, bialko, tluszcz, wegle FROM posilki WHERE osoba = ? AND dzien = ?", 
-                       conn, params=(wybrana_osoba, wybrany_dzien.strftime("%Y-%m-%d")))
+df = pd.read_sql_query("SELECT typ_posilku, opis, kcal, bialko, tluszcz, wegle FROM posilki WHERE osoba = ? AND dzien = ?", conn, params=(osoba, wybrany_dzien))
 conn.close()
 
 zjedzone_kcal = df['kcal'].sum() if not df.empty else 0
 zostalo_kcal = target_kcal - zjedzone_kcal
 
 st.progress(min(max(zjedzone_kcal / target_kcal, 0.0), 1.0))
-st.write(f"Zjedzono: **{zjedzone_kcal:.0f}** / **{target_kcal:.0f} kcal** (Zostało: **{zostalo_kcal:.0f} kcal**)")
+st.write(f"Zjedzono: **{zjedzone_kcal:.1f}** / **{target_kcal} kcal** (Zostało: **{zostalo_kcal:.1f} kcal**)")
 
 if not df.empty:
     st.dataframe(df, use_container_width=True)
@@ -226,12 +317,13 @@ else:
 
 st.divider()
 
-# --- 6. PROPOZYCJE DAŃ ZE ZDJĘCIAMI ---
-st.subheader("🥪 Pomysł na posiłek")
+#--- 8. PROPOZYCJE DAŃ ZE ZDJĘCIAMI ---
+st.subheader(" Pomysł na posiłek")
 
 if zostalo_kcal > 0:
-    st.write(f"💡 Zostało Ci jeszcze **{zostalo_kcal:.0f} kcal**. Oto propozycja dania dla Ciebie:")
-    
+    st.write(f" Zostało Ci jeszcze {zostalo_kcal:.0f} kcal. Oto propozycja dania dla Ciebie:")
+
+# Logika wyboru posiłku w zależności od kalorii
     if zostalo_kcal < 250:
         nazwa = "Jogurt naturalny z garścią borówek"
         kcal_str = "~150 kcal | Białko: 10g | Tłuszcz: 4g"
@@ -252,14 +344,14 @@ if zostalo_kcal > 0:
         foto_url = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c"
 
     col_img, col_txt = st.columns([1, 2])
-    
+
     with col_img:
         st.image(foto_url, use_container_width=True)
-            
+
     with col_txt:
-        st.markdown(f"### {nazwa}")
-        st.write(f"**Kaloryczność:** {kcal_str}")
-        st.write(f"**Składniki:** {skladniki}")
-        st.write(f"**Przygotowanie:** {przepis}")
+        st.markdown(f"###  {nazwa}")
+        st.write(f"Kaloryczność: {kcal_str}")
+        st.write(f"Składniki: {skladniki}")
+        st.write(f"Przygotowanie: {przepis}")
 else:
-    st.warning("Przekroczyłeś dzisiejszy limit kalorii! Odpocznij i pij dużo wody 💧")
+    st.warning("Przekroczyłeś dzisiejszy limit kalorii! Odpocznij i pij dużo wody ")
