@@ -1,3 +1,9 @@
 streamlit
 plotly
+supabasestreamlit
+requests
+pandas
+pillow
+streamlit-mic-recorder
+pyzbar
 supabase
