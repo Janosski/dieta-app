@@ -275,7 +275,7 @@ st.subheader(" Pomysł na posiłek")
 if zostalo_kcal > 0:
     st.write(f" Zostało Ci jeszcze {zostalo_kcal:.0f} kcal. Oto propozycja dania dla Ciebie:")
 
-Logika wyboru posiłku w zależności od kalorii
+# Logika wyboru posiłku w zależności od kalorii
     if zostalo_kcal < 250:
         nazwa = "Jogurt naturalny z garścią borówek"
         kcal_str = "~150 kcal | Białko: 10g | Tłuszcz: 4g"
