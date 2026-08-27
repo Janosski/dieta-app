@@ -2,12 +2,45 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import requests
+import json
 from datetime import datetime
 from PIL import Image
 from pyzbar.pyzbar import decode
 from streamlit_mic_recorder import speech_to_text
+from google import genai
+from google.genai import types
 
-# --- 1. FUNKCJA POBIERANIA MAKRO Z KODU KRESKOWEGO ---
+# --- 1. INICJALIZACJA GEMINI AI ---
+GEMINI_KEY = "AQ.Ab8RN6Jvm_UjVz1relmWPPDWTHCmCcr-HCLVv31p7yPnbVUAMA"
+client = genai.Client(api_key=GEMINI_KEY)
+
+def przelicz_glos_na_makro(tekst_glosowy):
+    prompt = f"""
+    Przeanalizuj wypowiedź użytkownika o zjedzonym posiłku: "{tekst_glosowy}".
+    Rozpoznaj składniki, oszacuj ich wagę oraz wylicz wartości odżywcze.
+    Zwróć wynik WYŁĄCZNIE jako czysty JSON bez żadnego dodatkowego tekstu ani formatowania markdown w tym formacie:
+    {{
+        "nazwa": "Nazwa posiłku",
+        "kcal": 0,
+        "bialko": 0,
+        "tluszcz": 0,
+        "wegle": 0
+    }}
+    """
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        st.error(f"Błąd analizy AI: {e}")
+        return None
+
+# --- 2. FUNKCJA POBIERANIA MAKRO Z KODU KRESKOWEGO ---
 def pobierz_dane_z_kodu(kod_kreskowy):
     kod_clean = str(kod_kreskowy).strip()
     url = f"https://world.openfoodfacts.org/api/v0/product/{kod_clean}.json"
@@ -35,7 +68,7 @@ def pobierz_dane_z_kodu(kod_kreskowy):
         pass
     return None
 
-# --- 2. BAZA DANYCH LOKALNA ---
+# --- 3. BAZA DANYCH LOKALNA ---
 def init_db():
     conn = sqlite3.connect('dziennik_zywieniowy.db')
     c = conn.cursor()
@@ -69,20 +102,19 @@ def dodaj_posilek(osoba, dzien, typ_posilku, opis, kcal, bialko, tluszcz, wegle)
 
 init_db()
 
-# --- 3. USTAWIENIA STRONY ---
+# --- 4. USTAWIENIA STRONY ---
 st.set_page_config(page_title="Rodzinny Asystent Diety", page_icon="🥗", layout="wide")
 st.title("🥗 Rodzinny Asystent Diety i Zdrowia")
 
-# Wybór profilu i dnia
 col_prof1, col_prof2 = st.columns(2)
 with col_prof1:
-    osoba = st.selectbox("👤 Profil użytkownika:", ["Janek", "Justyna", "Mama", "Seba"])
+    osoba = st.selectbox("👤 Profil użytkownika:", ["Janek", "Justyna", "Mama", "Seba","gość","gość2"])
 with col_prof2:
     wybrany_dzien = st.selectbox("📅 Dzień tygodnia:", ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"])
 
 st.divider()
 
-# --- 4. KALKULATOR ZAPOTRZEBOWANIA (WIEK, PRACA, WODA, BMI) ---
+# --- 5. KALKULATOR ZAPOTRZEBOWANIA (WIEK, PRACA, WODA, BMI) ---
 st.subheader("⚙️ Twoje Parametry & Cel Kaloryczny")
 
 c1, c2, c3, c4 = st.columns(4)
@@ -100,7 +132,6 @@ tryb_pracy = c_praca.selectbox("💼 Tryb pracy / Aktywność:", [
 ])
 cel = c_cel.selectbox("🎯 Cel:", ["Redukcja (Schudnąć)", "Utrzymanie wagi", "Masa (Przytyć)"])
 
-# Obliczenia BMR i CPM
 if plec == "Mężczyzna":
     bmr = 10 * waga + 6.25 * wzrost - 5 * wiek + 5
 else:
@@ -125,7 +156,6 @@ target_kcal = round(target_kcal)
 woda_litry = round(waga * 0.035, 1)
 bmi = round(waga / ((wzrost/100)**2), 1)
 
-# Wyświetlanie celów i grafik
 m1, m2, m3 = st.columns(3)
 m1.metric("🎯 Cel kaloryczny", f"{target_kcal} kcal")
 m2.metric("💧 Zapotrzebowanie na wodę", f"{woda_litry} L / dzień")
@@ -133,8 +163,8 @@ m3.metric("📊 Twoje BMI", f"{bmi}")
 
 st.divider()
 
-# --- 5. SKANOWANIE KODU & DYKTOWANIE GŁOSEM ---
-st.subheader("➕ Dodaj posiłek (Skaner / Głos / Ręcznie)")
+# --- 6. DODAWANIE POSIŁKU (SKANER / AI GŁOS / RĘCZNIE) ---
+st.subheader("➕ Dodaj posiłek")
 
 c_cam, c_voice = st.columns(2)
 
@@ -152,34 +182,48 @@ with c_cam:
             st.warning("⚠️ Nie odczytano kodu. Spróbuj zbliżyć obiektyw.")
     kod_input = st.text_input("Kod kreskowy (lub wpisz ręcznie):", value=wykryty_kod)
 
-with c_voice:
-    st.write("🎙️ **Dyktuj posiłek głosem:**")
-    tekst_z_głosu = speech_to_text(language='pl', start_prompt="🔴 Nagraj głos", stop_prompt="🟢 Stop", key='stt')
-    if tekst_z_głosu:
-        st.info(f"Rozpoznano: {tekst_z_głosu}")
-
-# Sprawdzanie makro w bazie z kodu
 dane_z_kodu = None
 if kod_input:
     dane_z_kodu = pobierz_dane_z_kodu(kod_input)
-    if dane_z_kodu:
-        st.success(f"🔎 Znaleziono: **{dane_z_kodu['nazwa']}** (100g = {dane_z_kodu['kcal_100g']} kcal)")
+
+dane_z_ai = None
+with c_voice:
+    st.write("🎙️ **Dyktuj posiłek głosem (AI przeliczy makro):**")
+    tekst_z_głosu = speech_to_text(language='pl', start_prompt="🔴 Nagraj głos", stop_prompt="🟢 Stop", key='stt')
+    if tekst_z_głosu:
+        st.info(f"Rozpoznano: *{tekst_z_głosu}*")
+        with st.spinner("🤖 Gemini AI analizuje posiłek..."):
+            dane_z_ai = przelicz_glos_na_makro(tekst_z_głosu)
+
+# Wyznaczenie domyślnych wartości w formularzu
+if dane_z_ai:
+    domyslna_nazwa = dane_z_ai.get('nazwa', '')
+    def_kcal = float(dane_z_ai.get('kcal', 0.0))
+    def_b = float(dane_z_ai.get('bialko', 0.0))
+    def_t = float(dane_z_ai.get('tluszcz', 0.0))
+    def_w = float(dane_z_ai.get('wegle', 0.0))
+elif dane_z_kodu:
+    domyslna_nazwa = dane_z_kodu['nazwa']
+    def_kcal = dane_z_kodu['kcal_100g']
+    def_b = dane_z_kodu['bialko_100g']
+    def_t = dane_z_kodu['tluszcz_100g']
+    def_w = dane_z_kodu['wegle_100g']
+else:
+    domyslna_nazwa = ""
+    def_kcal, def_b, def_t, def_w = 0.0, 0.0, 0.0, 0.0
 
 typ_posilku = st.selectbox("Typ posiłku:", ["Śniadanie", "Drugie śniadanie", "Obiad", "Kolacja", "Przekąska"])
-
-domyslna_nazwa = dane_z_kodu['nazwa'] if dane_z_kodu else (tekst_z_głosu if tekst_z_głosu else "")
 opis_input = st.text_input("Nazwa posiłku:", value=domyslna_nazwa)
 
-gramatura = st.number_input("Waga porcji (g):", min_value=1, value=100)
-
-if dane_z_kodu:
+if dane_z_kodu and not dane_z_ai:
+    gramatura = st.number_input("Waga porcji z kodu (g):", min_value=1, value=100)
     przelicznik = gramatura / 100.0
-    calc_kcal = round(dane_z_kodu['kcal_100g'] * przelicznik, 1)
-    calc_b = round(dane_z_kodu['bialko_100g'] * przelicznik, 1)
-    calc_t = round(dane_z_kodu['tluszcz_100g'] * przelicznik, 1)
-    calc_w = round(dane_z_kodu['wegle_100g'] * przelicznik, 1)
+    calc_kcal = round(def_kcal * przelicznik, 1)
+    calc_b = round(def_b * przelicznik, 1)
+    calc_t = round(def_t * przelicznik, 1)
+    calc_w = round(def_w * przelicznik, 1)
 else:
-    calc_kcal, calc_b, calc_t, calc_w = 0.0, 0.0, 0.0, 0.0
+    calc_kcal, calc_b, calc_t, calc_w = def_kcal, def_b, def_t, def_w
 
 col_k, col_b, col_t, col_w = st.columns(4)
 input_kcal = col_k.number_input("Kcal", value=calc_kcal)
@@ -195,7 +239,7 @@ if st.button("💾 Zapisz posiłek w dzienniku", type="primary"):
 
 st.divider()
 
-# --- 6. DZIENNIK I PASEK POSTĘPU ---
+# --- 7. DZIENNIK I PASEK POSTĘPU ---
 st.subheader(f"📊 Dziennik posiłków: {osoba} ({wybrany_dzien})")
 
 conn = sqlite3.connect('dziennik_zywieniowy.db')
@@ -215,13 +259,11 @@ else:
 
 st.divider()
 
-# --- 7. PROPOZYCJE DAŃ ZE ZDJĘCIAMI (GIF / JPG) ---
-st.subheader("🥪 Pomysł na posiłek (Ze zdjęciem)")
+# --- 8. PROPOZYCJE DAŃ ZE ZDJĘCIAMI ---
+st.subheader("🥪 Pomysł na posiłek")
 
 if zostalo_kcal > 0:
     st.write(f"💡 Zostało Ci jeszcze **{zostalo_kcal:.0f} kcal**. Oto propozycja dania dla Ciebie:")
-    
-    # Przykładowe gotowe przepisy ze zdjęciami
     col_img, col_txt = st.columns([1, 2])
     with col_img:
         st.image("https://images.unsplash.com/photo-1525351484163-7529414344d8?w=500", caption="Tosty z serem i szynką", use_column_width=True)
