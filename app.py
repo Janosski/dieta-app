@@ -270,17 +270,24 @@ else:
 st.divider()
 
 # --- 8. PROPOZYCJE DAŃ ZE ZDJĘCIAMI ---
-st.subheader("🥪 Pomysł na posiłek")
+st.subheader(" Pomysł na posiłek")
 
 if zostalo_kcal > 0:
-    st.write(f"💡 Zostało Ci jeszcze **{zostalo_kcal:.0f} kcal**. Oto propozycja dania dla Ciebie:")
+    st.write(f" Zostało Ci jeszcze {zostalo_kcal:.0f} kcal. Oto propozycja dania dla Ciebie:")
+
     col_img, col_txt = st.columns([1, 2])
+
+    foto_url = "https://images.unsplash.com/photo-1528735602780-2552fd46c7af"
+
     with col_img:
-        st.image("https://images.unsplash.com/photo-1525351484163-7529414344d8?w=500", caption="Tosty z serem i szynką", use_column_width=True)
+        if foto_url:
+            st.image(foto_url, use_container_width=True)
+
     with col_txt:
-        st.markdown("### 🍞 Tosty z serem, szynką i warzywami")
-        st.write("**Kaloryczność:** ~450 kcal | **Białko:** 22g | **Tłuszcz:** 18g")
-        st.write("**Składniki:** 2 kromki chleba tostowego, 2 plastry sera żółtego, 2 plastry szynki, pomidor, ogórek.")
-        st.write("**Przygotowanie:** Złóż tosty z serem i szynką, zapiecz w opiekaczu. Podawaj z pokrojonym w plastry pomidorem i ogórkiem.")
+        st.markdown("###  Tosty z serem, szynką i warzywami")
+        st.write("Kaloryczność: ~450 kcal | Białko: 22g | Tłuszcz: 18g")
+        st.write("Składniki: 2 kromki chleba tostowego, 2 plastry sera żółtego, 2 plastry szynki, pomidor, ogórek")
+        st.write("Przygotowanie: Złóż tosty z serem i szynką, zapiecz w opiekaczu. Podawaj z pokrojonymi warzywami.")
+
 else:
     st.warning("Przekroczyłeś dzisiejszy limit kalorii! Odpocznij i pij dużo wody 💧")
